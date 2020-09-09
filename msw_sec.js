@@ -239,7 +239,15 @@ config.sortie_name = '';
 
 function parseDataMission(topic, str_message) {
     try {
+        try {
+            config.sortie = my_sortie_name;
+        }
+        catch (e) {
+            config.sortie_name = '';
+        }
+
         // User define Code
+        config.sortie_name = '';
         ///////////////////////////////////////////////////////////////////////
 
         var topic_arr = topic.split('/');
@@ -250,6 +258,7 @@ function parseDataMission(topic, str_message) {
         console.log('[parseDataMission] data format of lib is not json');
     }
 }
+
 
 function parseControlMission(topic, str_message) {
     try {
