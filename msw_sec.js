@@ -292,7 +292,7 @@ function parseFcData(topic, str_message) {
         if (topic_arr[topic_arr.length - 1] == 'global_position_int') {
             var _topic = '/MUV/control/' + config.lib[0].name + '/' + config.lib[0].control[1]; // 'Req_enc'
 
-            if(test_count <= 10) {
+            if(test_count < 100) {
 
                 console.log("\n========    " + test_count + "=========\n");
 
