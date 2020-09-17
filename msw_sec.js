@@ -293,37 +293,17 @@ function parseFcData(topic, str_message) {
         if (topic_arr[topic_arr.length - 1] == 'global_position_int') {
             var _topic = '/MUV/control/' + config.lib[0].name + '/' + config.lib[0].control[1]; // 'Req_enc'
 
-            // if(enc_test_count < 100) {
-            //
-            //     console.log("\nenc ========    " + enc_test_count + "=========\n");
-            //
-            //     enc_test_count++;
-            //     msw_mqtt_client.publish(_topic, Buffer.from(str_message).toString('hex'));
-            // }
+            if(enc_test_count < 100) {
 
-            // _topic = '/MUV/control/' + config.lib[0].name + '/' + config.lib[0].control[2]; // 'Req_sig'
-            //
-            // if(sig_test_count < 100) {
-            //
-            //     console.log("\nsig ========    " + sig_test_count + "=========\n");
-            //
-            //     sig_test_count++;
-            //     msw_mqtt_client.publish(_topic, Buffer.from(str_message).toString('hex'));
-            // }
+                console.log("\nenc ========    " + enc_test_count + "=========\n");
+
+                enc_test_count++;
+                msw_mqtt_client.publish(_topic, Buffer.from(str_message).toString('hex'));
+            }
         }
 
         else if (topic_arr[topic_arr.length - 1] == 'heartbeat') {
-            var _topic = '/MUV/control/' + config.lib[0].name + '/' + config.lib[0].control[1]; // 'Req_enc'
-
-            // if(enc_test_count < 100) {
-            //
-            //     console.log("\nenc ========    " + enc_test_count + "=========\n");
-            //
-            //     enc_test_count++;
-            //     msw_mqtt_client.publish(_topic, Buffer.from(str_message).toString('hex'));
-            // }
-
-            _topic = '/MUV/control/' + config.lib[0].name + '/' + config.lib[0].control[2]; // 'Req_sig'
+            var _topic = '/MUV/control/' + config.lib[0].name + '/' + config.lib[0].control[2]; // 'Req_sig'
 
             if(sig_test_count < 100) {
 
