@@ -279,7 +279,8 @@ function parseFcData(topic, str_message) {
     var topic_arr = topic.split('/');
     if(topic_arr[topic_arr.length-1] == 'global_position_int') {
         var _topic = '/MUV/control/' + config.lib[0].name + '/' + config.lib[0].control[1]; // 'Req_enc'
-        msw_mqtt_client.publish(_topic, str_message);
+
+        msw_mqtt_client.publish(_topic, Buffer.from(str_message).toString('hex'));
     }
     ///////////////////////////////////////////////////////////////////////
 }
