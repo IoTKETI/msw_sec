@@ -52,7 +52,7 @@ catch (e) {
         target: 'armv6',
         description: "[name] [portnum] [baudrate]",
         scripts: './lib_sec /dev/ttyUSB3 115200',
-        data: ['Req_auth'],
+        data: ['Req_auth', 'Req_ready'],
         control: ['Req_start', 'Req_enc', 'Req_sig', 'Res_auth']
     };
     config.lib.push(add_lib);
@@ -249,11 +249,16 @@ function parseDataMission(topic, str_message) {
             config.sortie_name = '';
         }
 
+        var topic_arr = topic.split('/');
+
         // User define Code
         config.sortie_name = '';
+
+        if(topic_arr[topic_arr.length - 1] == 'Req_ready') {
+            authResult = 'done';
+        }
         ///////////////////////////////////////////////////////////////////////
 
-        var topic_arr = topic.split('/');
         var data_topic = '/Mobius/' + config.gcs + '/Mission_Data/' + config.drone + '/' + config.name + '/' + topic_arr[topic_arr.length-1];
         msw_mqtt_client.publish(data_topic + config.sortie_name, str_message);
     }
@@ -268,9 +273,6 @@ function parseControlMission(topic, str_message) {
         var topic_arr = topic.split('/');
 
         // User define Code
-        if(topic_arr[topic_arr.length - 1] == 'Res_auth') {
-            authResult = 'done';
-        }
         ///////////////////////////////////////////////////////////////////////
 
         var _topic = '/MUV/control/' + config.lib[0].name + '/' + topic_arr[topic_arr.length - 1];
