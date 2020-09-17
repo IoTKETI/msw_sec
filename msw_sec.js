@@ -293,7 +293,7 @@ function parseFcData(topic, str_message) {
         if (topic_arr[topic_arr.length - 1] == 'global_position_int') {
             var _topic = '/MUV/control/' + config.lib[0].name + '/' + config.lib[0].control[1]; // 'Req_enc'
 
-            if(enc_test_count < 50) {
+            if(enc_test_count < 10) {
 
                 console.log("\nenc ========    " + enc_test_count + "=========\n");
 
@@ -305,7 +305,7 @@ function parseFcData(topic, str_message) {
         else if (topic_arr[topic_arr.length - 1] == 'heartbeat') {
             var _topic = '/MUV/control/' + config.lib[0].name + '/' + config.lib[0].control[2]; // 'Req_sig'
 
-            if(sig_test_count < 50) {
+            if(sig_test_count < 10) {
 
                 console.log("\nsig ========    " + sig_test_count + "=========\n");
 
