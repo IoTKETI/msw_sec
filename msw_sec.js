@@ -255,7 +255,7 @@ function parseDataMission(topic, str_message) {
         config.sortie_name = '';
 
         if(topic_arr[topic_arr.length - 1] == 'Req_ready') {
-            setTimeout(setAuthResult, 1);
+            setTimeout(setAuthResult, 10000);
         }
         ///////////////////////////////////////////////////////////////////////
 
