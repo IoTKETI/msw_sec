@@ -226,6 +226,9 @@ setTimeout(init, 1000);
 
 // 유저 디파인 미션 소프트웨어 기능
 ///////////////////////////////////////////////////////////////////////////////
+
+var authResult = 'none';
+
 setTimeout(function () {
     if(msw_mqtt_client != null) {
         var _topic = '/MUV/control/' + config.lib[0].name + '/' + config.lib[0].control[0]; // 'Req_start'
@@ -262,10 +265,14 @@ function parseDataMission(topic, str_message) {
 
 function parseControlMission(topic, str_message) {
     try {
+        var topic_arr = topic.split('/');
+
         // User define Code
+        if(topic_arr[topic_arr.length - 1] == 'Res_auth') {
+            authResult = 'done';
+        }
         ///////////////////////////////////////////////////////////////////////
 
-        var topic_arr = topic.split('/');
         var _topic = '/MUV/control/' + config.lib[0].name + '/' + topic_arr[topic_arr.length - 1];
         msw_mqtt_client.publish(_topic, str_message);
     }
@@ -275,12 +282,15 @@ function parseControlMission(topic, str_message) {
 }
 
 function parseFcData(topic, str_message) {
-    // User define Code
     var topic_arr = topic.split('/');
-    if(topic_arr[topic_arr.length-1] == 'global_position_int') {
-        var _topic = '/MUV/control/' + config.lib[0].name + '/' + config.lib[0].control[1]; // 'Req_enc'
 
-        msw_mqtt_client.publish(_topic, Buffer.from(str_message).toString('hex'));
+    // User define Code
+    if(authResult == 'done') {
+        if (topic_arr[topic_arr.length - 1] == 'global_position_int') {
+            var _topic = '/MUV/control/' + config.lib[0].name + '/' + config.lib[0].control[1]; // 'Req_enc'
+
+            msw_mqtt_client.publish(_topic, Buffer.from(str_message).toString('hex'));
+        }
     }
     ///////////////////////////////////////////////////////////////////////
 }
