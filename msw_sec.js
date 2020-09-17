@@ -208,8 +208,13 @@ function on_receive_from_muv(topic, str_message) {
     parseControlMission(topic, str_message);
 }
 
+var req_auth_count = 0;
 function on_receive_from_lib(topic, str_message) {
     //console.log('[' + topic + '] ' + str_message);
+
+    if(authResult == 'done') {
+        console.log('req_auth_count: ' + req_auth_count++);
+    }
 
     parseDataMission(topic, str_message);
 }
