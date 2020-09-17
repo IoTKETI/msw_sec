@@ -260,7 +260,7 @@ function parseDataMission(topic, str_message) {
         config.sortie_name = '';
 
         if(topic_arr[topic_arr.length - 1] == 'Req_ready') {
-            authResult = 'done';
+            setTimeout(setAuthResult, 10000);
         }
         ///////////////////////////////////////////////////////////////////////
 
@@ -304,4 +304,8 @@ function parseFcData(topic, str_message) {
         }
     }
     ///////////////////////////////////////////////////////////////////////
+}
+
+function setAuthResult() {
+    authResult = 'done';
 }
