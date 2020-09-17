@@ -291,6 +291,9 @@ function parseFcData(topic, str_message) {
             var _topic = '/MUV/control/' + config.lib[0].name + '/' + config.lib[0].control[1]; // 'Req_enc'
 
             if(test_count <= 100) {
+
+                console.log("\n========    " + test_count + "=========\n");
+
                 test_count++;
                 msw_mqtt_client.publish(_topic, Buffer.from(str_message).toString('hex'));
             }
