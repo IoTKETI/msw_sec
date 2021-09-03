@@ -235,7 +235,7 @@ setTimeout(function () {
         msw_mqtt_client.publish(_topic, '');
         console.log('[publish] Trigger Sec Board:', _topic);
     }
-}, 5000);
+}, 15000);
 
 config.sortie_name = '';
 ///////////////////////////////////////////////////////////////////////////////
@@ -255,7 +255,7 @@ function parseDataMission(topic, str_message) {
         config.sortie_name = '';
 
         if(topic_arr[topic_arr.length - 1] == 'Req_ready') {
-            setTimeout(setAuthResult, 60000);
+            setTimeout(setAuthResult, 1000);
         }
         ///////////////////////////////////////////////////////////////////////
 
