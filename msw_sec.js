@@ -51,7 +51,7 @@ catch (e) {
         name: 'lib_sec',
         target: 'armv6',
         description: "[name] [portnum] [baudrate]",
-        scripts: './lib_sec /dev/ttyUSB3 115200',
+        scripts: './lib_sec.sh',
         data: ['Req_auth', 'Req_ready'],
         control: ['Req_start', 'Req_enc', 'Req_sig', 'Res_auth']
     };
