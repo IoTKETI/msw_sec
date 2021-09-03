@@ -1,0 +1,1062 @@
+import { MqttClient } from "mqtt";
+
+import KseDim, { TlsReadHandler, TlsWriteHandler } from "./KseDim";
+import { OutByte, OutByteArray, OutInt, OutShort } from "./OutObject";
+import {
+  FAILURE,
+  SUCCESS,
+  TLS_CONNECT,
+  TLS_HANDSHAKE,
+  TLS_DECRYPT,
+  TLS_CLOSE,
+  REQ_VERIFY,
+} from "./Constants";
+import Request from "./Request";
+import {
+  byteArrToHexStr,
+  getRandomInt,
+  hexStrToByteArr,
+  strToUtf8Arr,
+} from "./Converter";
+import {
+  TOPIC_MUV_DATA_LIB_SEC_REQ_AUTH,
+  TOPIC_MUV_DATA_LIB_SEC_REQ_READY,
+} from "./Topics";
+
+const DEV_CERT_INDEX = 2;
+const SUB_CA_CERT_INDEX = 1;
+const ROOT_CA_CERT_INDEX = 0;
+
+const CONNECTION_TIMEOUT = 30000;
+const TX_WAIT_TIME = 200;
+const INTERVAL = 50;
+let req_enc_count = 0;
+let req_sig_count = 0;
+
+////////////////////////////////////////////////////////////////////////////////
+//// TLS Connection  ///////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////////////
+interface TlsClientConnectBuffer {
+  resolve?: (
+    value?: number | PromiseLike<number | null> | null | undefined,
+  ) => void;
+  requests: Request[];
+}
+
+interface TlsHandshakeBuffer {
+  resolve?: (
+    value?: number[] | PromiseLike<number[] | null> | null | undefined,
+  ) => void;
+  requests: Request[];
+}
+
+interface TlsEncryptBuffer {
+  resolve?: (
+    value?: number[] | PromiseLike<number[] | null> | null | undefined,
+  ) => void;
+  requests: Request[];
+}
+
+type ChannelInfo = {
+  [key: string]: number;
+};
+
+export default class DimClientHandler {
+  //// Constructor ///////////////////////////////////////////////////////////////
+  constructor(mqttClient: MqttClient) {
+    this.mqttClient = mqttClient;
+  }
+
+  channelCnt = 0;
+  channelInfo: ChannelInfo = {};
+  descriptors: (number | null)[] = new Array(KseDim.MAX_CHANNEL_COUNT).fill(
+    null,
+  );
+
+  private tlsClientConnectBuffer: TlsClientConnectBuffer = {
+    resolve: undefined,
+    requests: [],
+  };
+
+  private tlsHandshakeBuffer: TlsHandshakeBuffer = {
+    resolve: undefined,
+    requests: [],
+  };
+
+  private tlsEncryptBuffer: TlsEncryptBuffer = {
+    resolve: undefined,
+    requests: [],
+  };
+
+  private mqttClient: MqttClient;
+
+  private tlsConnectResolver = (
+    iSocketDesc: number,
+    resolve: (value: number | PromiseLike<number>) => void,
+    timeout: number,
+  ) => {
+    if (
+      this.tlsClientConnectBuffer.requests &&
+      this.tlsClientConnectBuffer.requests.length > 0
+    ) {
+      // Check if any data is received with the session id.
+      const index = this.tlsClientConnectBuffer.requests.findIndex(
+        (request) => {
+          return request.sessionId === iSocketDesc;
+        },
+      );
+      if (index < 0) {
+        if (timeout <= 0) {
+          console.log("Connection request timed out.[0]");
+          resolve(FAILURE);
+          return;
+        } else {
+          setTimeout(() => {
+            this.tlsConnectResolver(iSocketDesc, resolve, timeout - INTERVAL);
+          }, INTERVAL);
+          return;
+        }
+      }
+
+      try {
+        const result: number[] = hexStrToByteArr(
+          this.tlsClientConnectBuffer.requests[index].data,
+        );
+        this.tlsClientConnectBuffer.requests.splice(index, 1);
+        if (result[0] === SUCCESS) resolve(SUCCESS);
+        else resolve(FAILURE);
+      } catch (e) {
+        this.tlsClientConnectBuffer.requests.splice(index, 1);
+        resolve(FAILURE);
+      }
+
+      return;
+    } else {
+      if (timeout <= 0) {
+        console.log("Connection request timed out.[1]");
+        resolve(FAILURE);
+        return;
+      } else {
+        setTimeout(() => {
+          this.tlsConnectResolver(iSocketDesc, resolve, timeout - INTERVAL);
+        }, INTERVAL);
+        return;
+      }
+    }
+  };
+
+  private connect = async (
+    mqttClient: MqttClient,
+    iSocketDesc: number,
+    timeout: number,
+  ): Promise<number> => {
+    return new Promise((resolve): void => {
+      try {
+        const request: Request = {
+          id: 1,
+          clientId: "none",
+          method: "MQTT",
+          type: TLS_CONNECT,
+          sessionId: iSocketDesc,
+          data: "",
+        };
+        const message = JSON.stringify(request);
+        mqttClient.publish(TOPIC_MUV_DATA_LIB_SEC_REQ_AUTH, message);
+        this.tlsConnectResolver(iSocketDesc, resolve, timeout);
+        return;
+      } catch (e) {
+        resolve(FAILURE);
+        return;
+      }
+    });
+  };
+
+  private close = async (
+    clientId: string,
+    iSocketDesc: number,
+  ): Promise<number> => {
+    return new Promise((resolve): void => {
+      try {
+        const request: Request = {
+          id: 1,
+          clientId,
+          method: "MQTT",
+          type: TLS_CLOSE,
+          sessionId: iSocketDesc,
+          data: "",
+        };
+        const message = JSON.stringify(request);
+        this.mqttClient.publish(TOPIC_MUV_DATA_LIB_SEC_REQ_AUTH, message);
+        resolve(SUCCESS);
+        return;
+      } catch (e) {
+        resolve(FAILURE);
+        return;
+      }
+    });
+  };
+
+  ////////////////////////////////////////////////////////////////////////////////
+  //// KSE TLS Handler  //////////////////////////////////////////////////////////
+  ////////////////////////////////////////////////////////////////////////////////
+  private tlsHandshakeReadResolver = (
+    clientId: string,
+    bCh: number,
+    resolve: (value: number[] | PromiseLike<number[] | null> | null) => void,
+    timeout: number,
+  ): void => {
+    // Get socket descriptor.
+    const iSocketDesc: number | null = this.descriptors[bCh];
+    if (iSocketDesc === null || iSocketDesc === undefined) {
+      console.log(`There is no descriptor for channel ${bCh}. [1]`);
+      resolve(null);
+      return;
+    }
+
+    if (
+      this.tlsHandshakeBuffer.requests &&
+      this.tlsHandshakeBuffer.requests.length > 0
+    ) {
+      // Check if any data is received with the session id.
+      const index = this.tlsHandshakeBuffer.requests.findIndex((request) => {
+        return request.sessionId === iSocketDesc;
+      });
+      if (index < 0) {
+        if (timeout <= 0) {
+          resolve(null);
+          return;
+        } else {
+          setTimeout(() => {
+            this.tlsHandshakeReadResolver(
+              clientId,
+              bCh,
+              resolve,
+              timeout - INTERVAL,
+            );
+          }, INTERVAL);
+          return;
+        }
+      }
+
+      try {
+        const result: number[] = hexStrToByteArr(
+          this.tlsHandshakeBuffer.requests[index].data,
+        );
+        this.tlsHandshakeBuffer.requests.splice(index, 1);
+        resolve(result);
+      } catch (e) {
+        this.tlsHandshakeBuffer.requests.splice(index, 1);
+        resolve(null);
+      }
+
+      return;
+    } else {
+      if (timeout <= 0) {
+        resolve(null);
+        return;
+      } else {
+        setTimeout(() => {
+          this.tlsHandshakeReadResolver(
+            clientId,
+            bCh,
+            resolve,
+            timeout - INTERVAL,
+          );
+        }, INTERVAL);
+        return;
+      }
+    }
+  };
+
+  private tlsEncryptReadResolver = (
+    clientId: string,
+    bCh: number,
+    resolve: (value: number[] | PromiseLike<number[] | null> | null) => void,
+    timeout: number,
+  ): void => {
+    // Get socket descriptor.
+    const iSocketDesc: number | null = this.descriptors[bCh];
+    if (iSocketDesc === null || iSocketDesc === undefined) {
+      console.log(`There is no descriptor for channel ${bCh}. [2]`);
+      resolve(null);
+      return;
+    }
+
+    if (
+      this.tlsEncryptBuffer.requests &&
+      this.tlsEncryptBuffer.requests.length > 0
+    ) {
+      // check if any data is received with the session id.
+      const index = this.tlsEncryptBuffer.requests.findIndex((request) => {
+        return request.sessionId === iSocketDesc;
+      });
+      if (index < 0) {
+        if (timeout <= 0) {
+          resolve(null);
+          return;
+        } else {
+          setTimeout(() => {
+            this.tlsEncryptReadResolver(
+              clientId,
+              bCh,
+              resolve,
+              timeout - INTERVAL,
+            );
+          }, INTERVAL);
+          return;
+        }
+      }
+
+      try {
+        const result: number[] = hexStrToByteArr(
+          this.tlsEncryptBuffer.requests[index].data,
+        );
+        this.tlsEncryptBuffer.requests.splice(index, 1);
+        resolve(result);
+      } catch (e) {
+        this.tlsEncryptBuffer.requests.splice(index, 1);
+        resolve(null);
+      }
+
+      return;
+    } else {
+      if (timeout <= 0) {
+        resolve(null);
+        return;
+      } else {
+        setTimeout(() => {
+          this.tlsEncryptReadResolver(
+            clientId,
+            bCh,
+            resolve,
+            timeout - INTERVAL,
+          );
+        }, INTERVAL);
+        return;
+      }
+    }
+  };
+
+  private tlsWriteHandlerImpl: TlsWriteHandler = {
+    write: (
+      iDataType: number,
+      clientId: string,
+      bCh: number,
+      abData: number[],
+    ): Promise<number> => {
+      return new Promise((resolve): void => {
+        try {
+          // Get socket descriptor.
+          const iSocketDesc: number | null = this.descriptors[bCh];
+          if (iSocketDesc === null || iSocketDesc === undefined) {
+            console.log(`There is no descriptor for channel ${bCh}. [3]`);
+            resolve(-1);
+            return;
+          }
+
+          switch (iDataType) {
+            case KseDim.KSETLS_DATA_HANDSHAKE: {
+              const request: Request = {
+                id: 0,
+                clientId,
+                method: "MQTT",
+                type: TLS_HANDSHAKE,
+                sessionId: iSocketDesc,
+                data: byteArrToHexStr(abData),
+              };
+              const message = JSON.stringify(request);
+              this.mqttClient.publish(TOPIC_MUV_DATA_LIB_SEC_REQ_AUTH, message);
+              setTimeout(() => {
+                resolve(abData.length);
+              }, TX_WAIT_TIME);
+              return;
+            }
+
+            case KseDim.KSETLS_DATA_ENCRYPT: {
+              const request: Request = {
+                id: 1,
+                clientId,
+                method: "MQTT",
+                type: TLS_DECRYPT,
+                sessionId: iSocketDesc,
+                data: byteArrToHexStr(abData),
+              };
+              const message = JSON.stringify(request);
+              this.mqttClient.publish(TOPIC_MUV_DATA_LIB_SEC_REQ_AUTH, message);
+              setTimeout(() => {
+                resolve(abData.length);
+              }, TX_WAIT_TIME);
+              return;
+            }
+
+            default:
+              resolve(FAILURE);
+              return;
+          }
+        } catch (e) {
+          resolve(FAILURE);
+          return;
+        }
+      });
+    },
+  };
+
+  private tlsReadHandlerImpl: TlsReadHandler = {
+    read: (
+      iDataType: number,
+      clientId: string,
+      bCh: number,
+      timeout: number,
+    ): Promise<number[] | null> => {
+      return new Promise((resolve): void => {
+        try {
+          switch (iDataType) {
+            case KseDim.KSETLS_DATA_HANDSHAKE: {
+              this.tlsHandshakeReadResolver(clientId, bCh, resolve, timeout);
+              break;
+            }
+
+            case KseDim.KSETLS_DATA_ENCRYPT: {
+              this.tlsEncryptReadResolver(clientId, bCh, resolve, timeout);
+              break;
+            }
+
+            default:
+              return;
+          }
+          return;
+        } catch (e) {
+          resolve(null);
+          return;
+        }
+      });
+    },
+  };
+
+  private gKse: KseDim = new KseDim(
+    this.tlsReadHandlerImpl,
+    this.tlsWriteHandlerImpl,
+  );
+  giSocketDesc = -1;
+
+  ////////////////////////////////////////////////////////////////////////////////
+  //// KSE Operations  ///////////////////////////////////////////////////////////
+  ////////////////////////////////////////////////////////////////////////////////
+  private startTlsRead = async (clientId: string, iSocketDesc: number) => {
+    try {
+      // Get channel.
+      const bCh: number = this.channelInfo[iSocketDesc];
+      if (bCh === null || bCh === undefined) {
+        console.log(
+          `A channel is not found with the socket descriptor(${iSocketDesc}). [1]`,
+        );
+        return;
+      }
+
+      console.log("");
+      console.log("Start TLS decryption...");
+
+      const Kse: KseDim = this.gKse;
+      let abBuffer: number[] | null = null;
+
+      // Read TLS application data.
+      abBuffer = await Kse.KsetlsTlsRead(clientId, bCh);
+      if (abBuffer) {
+        console.log("KsetlsTlsRead() : Success...");
+        console.log(
+          "Decrypted message: ",
+          Buffer.from(abBuffer).toString("utf8"),
+        );
+      } else {
+        Kse.DebugPrintErrStr("KsetlsTlsRead()");
+        return;
+      }
+
+      return;
+    } catch (e) {
+      console.log("Client TLS reading data has failed.");
+      return;
+    }
+  };
+
+  public startTlsHandshake = async () => {
+    try {
+      if (this.channelCnt >= KseDim.MAX_CHANNEL_COUNT) {
+        console.log(
+          `Max channel count(${KseDim.MAX_CHANNEL_COUNT}) has been reached. Close other channel before opening a new channel.`,
+        );
+        return;
+      }
+
+      const bCh: number = this.descriptors.findIndex((descriptor) => {
+        return descriptor === null || descriptor === undefined;
+      });
+
+      const Kse: KseDim = this.gKse;
+      const bHandshakeType: number = KseDim.KSETLS_FULL_HANDSHAKE;
+      let sRv = KseDim.KSE_SUCCESS;
+
+      // Connect to server.
+      console.log("");
+      const iSocketDesc = new Date().getTime() + getRandomInt(1000000);
+
+      this.descriptors[bCh] = iSocketDesc;
+      this.channelInfo[iSocketDesc] = bCh;
+      this.channelCnt++;
+      const flag = true;
+      while (flag) {
+        console.log("The client is trying to connect to the server...");
+        try {
+          sRv = await this.connect(
+            this.mqttClient,
+            iSocketDesc,
+            CONNECTION_TIMEOUT,
+          );
+          if (sRv !== SUCCESS) {
+            console.log("Server connection failed.");
+            continue;
+          }
+        } catch (e) {
+          console.log("Server connection failed.");
+          continue;
+        }
+        break;
+      }
+
+      // Open kseTLS.
+      console.log(`  * Open kseTLS(TLS Client) with session ${iSocketDesc}.`);
+      sRv = await Kse.KsetlsOpen(
+        bCh,
+        KseDim.KSETLS_MODE_TLS,
+        KseDim.KSETLS_CLIENT,
+        DEV_CERT_INDEX,
+        SUB_CA_CERT_INDEX,
+        ROOT_CA_CERT_INDEX,
+        KseDim.NO_USE,
+        KseDim.NO_USE,
+        KseDim.NO_USE,
+        KseDim.NO_USE,
+      );
+      if (sRv === KseDim.KSE_SUCCESS) {
+        console.log("KsetlsOpen() : Success...");
+      } else {
+        Kse.DebugPrintErrStr("KsetlsOpen()");
+        return;
+      }
+
+      // Handshake.
+      if (bHandshakeType === KseDim.KSETLS_FULL_HANDSHAKE)
+        console.log("  * Performing the TLS full handshake...");
+      else console.log("  * Performing the TLS abbreviated handshake...");
+      sRv = await Kse.KsetlsTlsClientHandshake("none", bCh, bHandshakeType);
+      if (sRv === KseDim.KSE_SUCCESS) {
+        console.log("KsetlsTlsClientHandshake() : Success...");
+        this.giSocketDesc = iSocketDesc;
+
+        // setTimeout(() => {
+        //   const msgToEncrypt = `This is a message for TLS encryption from a client. If you can read this message correctly, it means that the message has been decrypted correctly.`;
+        //   const dataToEncrypt = byteArrToHexStr(strToUtf8Arr(msgToEncrypt));
+        //   this.handleEncryptRequest(dataToEncrypt);
+        // }, 1000);
+
+        // setTimeout(() => {
+        //   const msgToEncrypt = `This is a message for ECDSA signature from a client. If you can read this message correctly, it means that the message has been decrypted correctly.`;
+        //   const dataToSign = byteArrToHexStr(strToUtf8Arr(msgToEncrypt));
+        //   this.handleSignRequest(dataToSign);
+        // }, 4000);
+      } else {
+        Kse.DebugPrintErrStr("KsetlsTlsClientHandshake()");
+        this.descriptors[bCh] = null;
+        delete this.channelInfo[iSocketDesc];
+        this.channelCnt--;
+        sRv = await Kse.KsetlsClose(bCh);
+        this.giSocketDesc = -1;
+        return;
+      }
+
+      this.mqttClient.publish(TOPIC_MUV_DATA_LIB_SEC_REQ_READY, "");
+      return;
+    } catch (e) {
+      console.log("Client TLS handshake has failed.");
+      return;
+    }
+  };
+
+  public startClient = async () => {
+    try {
+      console.log("");
+      console.log("Start the client...");
+      console.log("");
+
+      const Kse = this.gKse;
+      let sRv: number = KseDim.KSE_SUCCESS;
+
+      // KSE debug print enable.
+      Kse.gfEnableDebugPrint = true;
+
+      const outabVer: OutByteArray = new OutByteArray();
+      const outabChipSerial: OutByteArray = new OutByteArray();
+      const outabSystemTitle: OutByteArray = new OutByteArray();
+
+      const outbLifeCycle: OutByte = new OutByte();
+      const outbVcType: OutByte = new OutByte();
+      const outbMaxVcRetryCount: OutByte = new OutByte();
+
+      const outsMaxChannelCount: OutShort = new OutShort();
+      const outsMaxKcmvpKeyCount: OutShort = new OutShort();
+      const outsMaxCertKeyCount: OutShort = new OutShort();
+      const outsMaxIoDataSize: OutShort = new OutShort();
+      const outiInfoFileSize: OutInt = new OutInt();
+
+      // Power off and Power on KSE each.
+      sRv = await Kse.PowerOff();
+      sRv = await Kse.PowerOn(
+        outabVer,
+        outbLifeCycle,
+        outabChipSerial,
+        outabSystemTitle,
+        outbVcType,
+        outbMaxVcRetryCount,
+        outsMaxChannelCount,
+        outsMaxKcmvpKeyCount,
+        outsMaxCertKeyCount,
+        outsMaxIoDataSize,
+        outiInfoFileSize,
+      );
+
+      if (sRv === KseDim.KSE_SUCCESS) {
+        console.log("PowerOn() : Success...");
+      } else {
+        Kse.DebugPrintErrStr("PowerOn()");
+        return;
+      }
+
+      console.log("");
+      console.log(
+        "  * Version          :",
+        `${("0" + (outabVer.value as number[])[0].toString(16)).substr(-2)}`,
+        `${("0" + (outabVer.value as number[])[1].toString(16)).substr(-2)}`,
+        `${("0" + (outabVer.value as number[])[2].toString(16)).substr(-2)}`,
+      );
+      if (outbLifeCycle.value === KseDim.LC_MANUFACTURED)
+        console.log("  * Life Cycle       : MANUFACTURED");
+      else if (outbLifeCycle.value === KseDim.LC_ISSUED)
+        console.log("  * Life Cycle       : ISSUED");
+      else if (outbLifeCycle.value === KseDim.LC_TERMINATED)
+        console.log("  * Life Cycle       : TERMINATED");
+      else console.log("  * Life Cycle       : Unknown");
+
+      const abManufacturer: number[] = new Array(3);
+      Kse.ArrayCopy(
+        outabSystemTitle.value as number[],
+        0,
+        abManufacturer,
+        0,
+        3,
+      );
+
+      console.log(
+        "  * System Title     :",
+        `${("0" + (outabSystemTitle.value as number[])[0].toString(16)).substr(
+          -2,
+        )}`,
+        `${("0" + (outabSystemTitle.value as number[])[1].toString(16)).substr(
+          -2,
+        )}`,
+        `${("0" + (outabSystemTitle.value as number[])[2].toString(16)).substr(
+          -2,
+        )}`,
+        `${("0" + (outabSystemTitle.value as number[])[3].toString(16)).substr(
+          -2,
+        )}`,
+        `${("0" + (outabSystemTitle.value as number[])[4].toString(16)).substr(
+          -2,
+        )}`,
+        `${("0" + (outabSystemTitle.value as number[])[5].toString(16)).substr(
+          -2,
+        )}`,
+        `${("0" + (outabSystemTitle.value as number[])[6].toString(16)).substr(
+          -2,
+        )}`,
+        `${("0" + (outabSystemTitle.value as number[])[7].toString(16)).substr(
+          -2,
+        )}`,
+        Buffer.from(abManufacturer).toString("utf8"),
+        `${("0" + (outabSystemTitle.value as number[])[3].toString(16)).substr(
+          -2,
+        )}`,
+        `${("0" + (outabSystemTitle.value as number[])[4].toString(16)).substr(
+          -2,
+        )}`,
+        `${("0" + (outabSystemTitle.value as number[])[5].toString(16)).substr(
+          -2,
+        )}`,
+        `${("0" + (outabSystemTitle.value as number[])[6].toString(16)).substr(
+          -2,
+        )}`,
+        `${("0" + (outabSystemTitle.value as number[])[7].toString(16)).substr(
+          -2,
+        )}`,
+      );
+
+      if (outbVcType.value === KseDim.VC_DISABLED)
+        console.log("  * Verify code type : Disabled");
+      else if ((outbVcType.value as number) <= KseDim.VC_TYPE_4)
+        console.log(
+          "  *  Verify code type :",
+          ("0" + (outbVcType.value as number).toString(16)).substr(-2),
+        );
+      else console.log("  *  Verify code type : Unknown");
+
+      console.log(
+        "  * MaxVcRetryCount  :",
+        ("0" + (outbMaxVcRetryCount.value as number).toString(16)).substr(-2),
+      );
+      console.log(
+        "  * MaxKcmvpKeyCount :",
+        ("0" + (outsMaxKcmvpKeyCount.value as number).toString(16)).substr(-2),
+      );
+      console.log(
+        "  * MaxCertKeyCount  :",
+        ("0" + (outsMaxCertKeyCount.value as number).toString(16)).substr(-2),
+      );
+      console.log(
+        "  * MaxIoDataSize    :",
+        ("0" + (outsMaxIoDataSize.value as number).toString(16)).substr(-2),
+      );
+      console.log(
+        "  * FileSize         :",
+        ("0" + (outiInfoFileSize.value as number).toString(16)).substr(-2),
+      );
+      console.log("");
+
+      /////
+      ////  insert key
+      //// {
+
+      ////////////////////////////////////////////////////////////////////////////
+      //// setup code start //////////////////////////////////////////////////////
+      ////////////////////////////////////////////////////////////////////////////
+      // const sKeyIndex = 0;
+
+      // const abD: number[] = hexStrToByteArr(
+      //   "1A6601F02373F008FD4BB3A3537A7BC28FC87BF0B4611357C89F4F5D35377D51",
+      // );
+
+      // const abQxQy: number[] = hexStrToByteArr(
+      //   "69A7817931DA804BFD917D20A6565435CCC8D336AB20FF2B6334CA9B54EA83ABAF017403784B08EF229AEE6C08910D9DD7278BF5C44DA4C9D9CFDAE0865679C8",
+      // );
+
+      // const abMsg: number[] = strToUtf8Arr(
+      //   "This is an original message to be signed from a client.",
+      // );
+
+      // console.log("Erase ECDSA private key.");
+      // let iRv = await Kse.KcmvpEraseKey(KseDim.KCMVP_ECDSA_PRI_KEY, sKeyIndex);
+      // if (iRv !== KseDim.KSE_SUCCESS) {
+      //   Kse.DebugPrintErrStr("KcmvpEraseKey() ECDSA private key");
+      //   return;
+      // }
+
+      // console.log("Put ECDSA private key.");
+      // iRv = await Kse.KcmvpPutKey(KseDim.KCMVP_ECDSA_PRI_KEY, sKeyIndex, abD);
+      // if (iRv !== KseDim.KSE_SUCCESS) {
+      //   Kse.DebugPrintErrStr("KcmvpPutKey() ECDSA private key");
+      //   return;
+      // }
+
+      // console.log("Erase ECDSA public key.");
+      // iRv = await Kse.KcmvpEraseKey(KseDim.KCMVP_ECDSA_PUB_KEY, sKeyIndex);
+      // if (iRv !== KseDim.KSE_SUCCESS) {
+      //   Kse.DebugPrintErrStr("KcmvpEraseKey() ECDSA private key");
+      //   return;
+      // }
+
+      // console.log("Put ECDSA public key.");
+      // iRv = await Kse.KcmvpPutKey(
+      //   KseDim.KCMVP_ECDSA_PUB_KEY,
+      //   sKeyIndex,
+      //   abQxQy,
+      // );
+      // if (iRv !== KseDim.KSE_SUCCESS) {
+      //   Kse.DebugPrintErrStr("KcmvpPutKey() ECDSA public key");
+      //   return;
+      // }
+
+      // console.log("ECDSA Sign.");
+      // const abSig: number[] | null = await Kse.KcmvpEcdsaSign(
+      //   0,
+      //   abMsg,
+      //   sKeyIndex,
+      // );
+      // if (abSig === null) {
+      //   Kse.DebugPrintErrStr("KcmvpEcdsaSign()");
+      //   return;
+      // }
+
+      // console.log("ECDSA Verify.");
+      // iRv = await Kse.KcmvpEcdsaVerify(0, abMsg, abSig, sKeyIndex);
+      // if (iRv !== KseDim.KSE_SUCCESS) {
+      //   Kse.DebugPrintErrStr("KcmvpEcdsaVerify()");
+      //   return;
+      // }
+      // console.log("Key setup complete.");
+
+      ////  } end of insert key.
+
+      // const outabDid: OutByteArray = new OutByteArray();
+      // const outabAuthCode: OutByteArray = new OutByteArray();
+      // const outsDidLen: OutShort = new OutShort();
+      // const sDidIndex = 0;
+
+      // console.log("Read Drone ID.");
+      // iRv = await Kse.DimDidRead(
+      //   outabDid,
+      //   outsDidLen,
+      //   outabAuthCode,
+      //   sDidIndex,
+      //   KseDim.DID_ECDSA,
+      //   sKeyIndex
+      // );
+      // if (iRv !== KseDim.KSE_SUCCESS) {
+      //   Kse.DebugPrintErrStr("DimDidRead()");
+      //   return;
+      // }
+
+      // console.log(
+      //   "  * Drone ID         :",
+      //   (outabDid.value as number[]).reduce((accum, bDid: number): string => {
+      //     accum += String.fromCharCode(bDid);
+      //     return accum;
+      //   }, "")
+      // );
+
+      // console.log(
+      //   "  * Auth Code        :",
+      //   byteArrToHexStr(outabAuthCode.value as number[])
+      // );
+
+      // console.log("Verify Drone ID.");
+      // iRv = await Kse.DimDidVerify(
+      //   outabDid.value,
+      //   outsDidLen.value as number,
+      //   outabAuthCode.value,
+      //   KseDim.DID_ECDSA,
+      //   sKeyIndex
+      // );
+      // if (iRv !== KseDim.KSE_SUCCESS) {
+      //   Kse.DebugPrintErrStr("DimDidVerify()");
+      //   return;
+      // }
+      // console.log("Did test complete.");
+
+      // Power off KSE.
+      // sRv = await Kse.PowerOff();
+      ////////////////////////////////////////////////////////////////////////////
+      //// setup code end ////////////////////////////////////////////////////////
+      ////////////////////////////////////////////////////////////////////////////
+
+      return;
+    } catch (e) {
+      console.log("Booting the client has failed.");
+      return;
+    }
+  };
+
+  //// Request handling ////////////////////////////////////////////////////////
+  public handleAuthRequest = async (message: string): Promise<void> => {
+    try {
+      const request: Request = JSON.parse(message) as Request;
+      if (request.method !== "MQTT") return;
+
+      const clientId: string = request.clientId;
+      const iSocketDesc: number = request.sessionId;
+
+      if (
+        this.channelInfo[iSocketDesc] === null ||
+        this.channelInfo[iSocketDesc] === undefined
+      ) {
+        //console.log(`Socket descriptor(${iSocketDesc}) is not registered.`);
+        return;
+      }
+
+      switch (request.type) {
+        case TLS_CONNECT: {
+          req_enc_count = 0;
+          req_sig_count = 0;
+          this.tlsClientConnectBuffer.requests.push(request);
+          break;
+        }
+        case TLS_HANDSHAKE: {
+          this.tlsHandshakeBuffer.requests.push(request);
+          break;
+        }
+        case TLS_DECRYPT: {
+          this.tlsEncryptBuffer.requests.push(request);
+          this.startTlsRead(clientId, iSocketDesc);
+          break;
+        }
+        default:
+          return;
+      }
+    } catch (e) {
+//      console.log("handleAuthRequest() error: ", e.toString());
+      console.log("handleAuthRequest() error: ");
+      return;
+    }
+  };
+
+  public handleEncryptRequest = async (data: string): Promise<void> => {
+    try {
+      if (this.giSocketDesc === -1) {
+        //console.log("TLS session is not open yet.");
+        return;
+      }
+
+      console.log("Data to encrypt is received: ", data);
+      console.log("Req enc count: ", req_enc_count++);
+
+      // Get channel.
+      const bCh: number = this.channelInfo[this.giSocketDesc];
+      if (bCh === null || bCh === undefined) {
+        console.log(
+          `A channel is not found with the socket descriptor(${this.giSocketDesc}) [2].`,
+        );
+        return;
+      }
+
+      const abData = hexStrToByteArr(data);
+      const Kse: KseDim = this.gKse;
+      const sRv = await Kse.KsetlsTlsWrite("none", bCh, abData);
+      if (sRv === KseDim.KSE_SUCCESS) {
+        console.log("KsetlsTlsWrite() : Success...");
+      } else {
+        Kse.DebugPrintErrStr("KsetlsTlsWrite()");
+        return;
+      }
+    } catch (e) {
+//      console.log("handleEncryptRequest() error: ", e.toString());
+      console.log("handleAuthRequest() error: ");
+      return;
+    }
+  };
+
+  public handleSignRequest = async (data: string): Promise<void> => {
+    try {
+      if (this.giSocketDesc === -1) {
+        //console.log("TLS session is not open yet.");
+        return;
+      }
+
+      console.log("Data to sign is received: ", data);
+      console.log("Req sig count: ", req_sig_count++);
+
+      const Kse: KseDim = this.gKse;
+      const iSocketDesc = this.giSocketDesc;
+      const abData = hexStrToByteArr(data);
+      const bKeyIndex = 0;
+      const abSig = await Kse.KcmvpEcdsaSign(0, abData, bKeyIndex);
+      if (abSig === null) {
+        Kse.DebugPrintErrStr("KcmvpEcdsaSign()");
+        return;
+      }
+
+      const outabDid: OutByteArray = new OutByteArray();
+      const outabAuthCode: OutByteArray = new OutByteArray();
+      const outsDidLen: OutShort = new OutShort();
+      const sDidIndex = 0;
+      const sKeyIndex = 0;
+
+      // const iRv = await Kse.DimDidRead(
+      //   outabDid,
+      //   outsDidLen,
+      //   outabAuthCode,
+      //   sDidIndex,
+      //   KseDim.DID_ECDSA,
+      //   sKeyIndex
+      // );
+      // if (iRv !== KseDim.KSE_SUCCESS) {
+      //   Kse.DebugPrintErrStr("DimDidRead()");
+      //   return;
+      // }
+
+      outabDid.value = [
+        0x46,
+        0x61,
+        0x6b,
+        0x65,
+        0x20,
+        0x44,
+        0x72,
+        0x6f,
+        0x6e,
+        0x65,
+        0x20,
+        0x49,
+        0x44,
+        0x20,
+        0x20,
+      ];
+      outabDid.value = outabDid.value.concat(strToUtf8Arr(iSocketDesc + ""));
+
+      console.log(
+        "Drone ID :",
+        (outabDid.value as number[]).reduce((accum, bDid: number): string => {
+          accum += String.fromCharCode(bDid);
+          return accum;
+        }, ""),
+      );
+
+      outabAuthCode.value = [
+        0x46,
+        0x61,
+        0x6b,
+        0x65,
+        0x20,
+        0x41,
+        0x75,
+        0x74,
+        0x68,
+        0x20,
+        0x43,
+        0x6f,
+        0x64,
+        0x65,
+      ];
+
+      console.log(
+        "Auth Code :",
+        byteArrToHexStr(outabAuthCode.value as number[]),
+      );
+
+      const reqData = {
+        message: byteArrToHexStr(abData),
+        signature: byteArrToHexStr(abSig),
+      };
+
+      const reqMetaData = {
+        message: byteArrToHexStr(outabDid.value as number[]),
+        signature: byteArrToHexStr(outabAuthCode.value as number[]),
+      };
+
+      const request: Request = {
+        id: 0,
+        clientId: "none",
+        method: "MQTT",
+        type: REQ_VERIFY,
+        sessionId: iSocketDesc,
+        data: JSON.stringify(reqData),
+        metadata: JSON.stringify(reqMetaData),
+      };
+      const message = JSON.stringify(request);
+      this.mqttClient.publish(TOPIC_MUV_DATA_LIB_SEC_REQ_AUTH, message);
+      console.log("ECDSA message is sent: ", byteArrToHexStr(abData));
+      console.log("ECDSA signature is sent: ", byteArrToHexStr(abSig));
+      return;
+    } catch (e) {
+//      console.log("handleSignRequest() error: ", e.toString());
+      console.log("handleAuthRequest() error: ");
+      return;
+    }
+  };
+}
