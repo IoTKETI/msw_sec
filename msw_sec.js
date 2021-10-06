@@ -220,7 +220,7 @@ function on_process_fc_data(topic, str_message) {
 
     setTimeout( function () {
         parseFcData(topic, str_message);
-    }, 50000);
+    }, 5000);
 }
 
 setTimeout(init, 1000);
