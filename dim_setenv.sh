@@ -1,7 +1,7 @@
 #!/bin/bash
 
-sudo apt remove libusb-1.0-0 libusb-1.0-0-dev -y
-sudo apt remove libudev-dev -y
+#sudo apt remove libusb-1.0-0 libusb-1.0-0-dev -y
+#sudo apt remove libudev-dev -y
 
 # install libusb files
 echo " install libusb, libudev "
