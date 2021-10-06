@@ -218,9 +218,7 @@ function on_process_fc_data(topic, str_message) {
     var topic_arr = topic.split('/');
     fc[topic_arr[topic_arr.length-1]] = JSON.parse(str_message.toString());
 
-    setTimeout( function () {
-        parseFcData(topic, str_message);
-    }, 30000);
+    parseFcData(topic, str_message);
 }
 
 setTimeout(init, 1000);
