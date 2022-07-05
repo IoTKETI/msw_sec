@@ -29,7 +29,7 @@ config.name = 'msw_sec';
 
 global.drone_info = '';
 try {
-    drone_info = JSON.parse(fs.readFileSync('../drone_info.json', 'utf8'));
+    drone_info = JSON.parse(fs.readFileSync('./drone_info.json', 'utf8'));
 
     config.directory_name = config.name + '_' + config.name;
     config.gcs = drone_info.gcs;
@@ -78,22 +78,18 @@ function init() {
                 if (msw_mqtt_client != null) {
                     for (let i = 0; i < config.lib[idx].control.length; i++) {
                         let sub_container_name = config.lib[idx].control[i];
-                        let _topic = '/Mobius/' + config.gcs + '/Mission_Data/' + config.drone + '/' + config.name + '/' + sub_container_name;
-                        msw_mqtt_client.subscribe(_topic, function () {
-                            console.log('[msw_mqtt_client] control_topic is subscribed: ' + _topic);
-                        });
+                        let _topic = '/Mobius/' + config.gcs + '/Mission_Data/' + config.drone + '/' + sub_container_name;
+                        msw_mqtt_client.subscribe(_topic);
                         msw_sub_mobius_topic.push(_topic);
-                        // console.log('[msw_mqtt] msw_sub_mobius_topic[' + i + ']: ' + _topic);
+                        console.log('[msw_mqtt] msw_sub_mobius_topic[' + i + ']: ' + _topic);
                     }
 
                     for (let i = 0; i < config.lib[idx].data.length; i++) {
                         let container_name = config.lib[idx].data[i];
                         let _topic = '/MUV/data/' + config.lib[idx].name + '/' + container_name;
-                        local_msw_mqtt_client.subscribe(_topic, function () {
-                            console.log('[local_msw_mqtt_client] data_topic[' + idx + ']: ' + _topic);
-                        })
+                        local_msw_mqtt_client.subscribe(_topic);
                         msw_sub_lib_topic.push(_topic);
-                        // console.log('[lib_mqtt] msw_sub_lib_topic[' + i + ']: ' + _topic);
+                        console.log('[lib_mqtt] msw_sub_lib_topic[' + i + ']: ' + _topic);
                     }
                 }
 
