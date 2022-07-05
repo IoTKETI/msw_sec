@@ -102,7 +102,7 @@ function runLib(obj_lib) {
 
         } else {
             scripts_arr[0] = scripts_arr[0].replace('./', '');
-            scripts_arr[0] = './' + config.directory_name + '/' + scripts_arr[0];
+            scripts_arr[0] = './' + scripts_arr[0];
         }
         console.log('[msw] ' + config.directory_name);
         var run_lib = spawn(scripts_arr[0], scripts_arr.slice(1));
@@ -197,13 +197,13 @@ function msw_mqtt_connect(broker_ip, port) {
 }
 
 function on_receive_from_muv(topic, str_message) {
-    //console.log('[' + topic + '] ' + str_message);
+    console.log('[' + topic + '] ' + str_message);
 
     parseControlMission(topic, str_message);
 }
 
 function on_receive_from_lib(topic, str_message) {
-    //console.log('[' + topic + '] ' + str_message);
+    console.log('[' + topic + '] ' + str_message);
 
     parseDataMission(topic, str_message);
 }
