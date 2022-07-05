@@ -29,7 +29,7 @@ config.name = 'msw_sec';
 
 global.drone_info = '';
 try {
-    drone_info = JSON.parse(fs.readFileSync('../drone_info.json', 'utf8'));
+    drone_info = JSON.parse(fs.readFileSync('./drone_info.json', 'utf8'));
 
     config.directory_name = config.name + '_' + config.name;
     config.gcs = drone_info.gcs;
@@ -304,11 +304,6 @@ function parseDataMission(topic, str_message) {
         var data_topic = '/Mobius/' + config.gcs + '/Mission_Data/' + config.drone + '/' + config.name + '/' + topic_arr[topic_arr.length - 1];
         msw_mqtt_client.publish(data_topic, str_message);
         sh_man.crtci(data_topic + '?rcn=0', 0, str_message, null, function (rsc, res_body, parent, socket) {
-            if (rsc === '2001') {
-                setTimeout(mon_local_db, 500, data_topic);
-            } else {
-                lte_data.insert(JSON.parse(str_message));
-            }
         });
     } catch (e) {
         console.log('[parseDataMission] data format of lib is not json');
