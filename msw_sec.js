@@ -18,6 +18,7 @@ var mqtt = require('mqtt');
 var fs = require('fs');
 const util = require("util");
 var spawn = require('child_process').spawn;
+const {nanoid} = require('nanoid');
 
 global.sh_man = require('./http_man');
 
