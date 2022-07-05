@@ -282,9 +282,9 @@ setTimeout(init, 1000);
 var authResult = 'none';
 
 setTimeout(function () {
-    if (msw_mqtt_client != null) {
+    if (local_msw_mqtt_client != null) {
         var _topic = '/MUV/control/' + config.lib[0].name + '/' + config.lib[0].control[0]; // 'Req_start'
-        msw_mqtt_client.publish(_topic, '');
+        local_msw_mqtt_client.publish(_topic, '');
         console.log('\r\n\r\n[publish] Trigger Sec Board:', _topic, '\r\n\r\n\r\n');
     }
 }, 15000);
