@@ -18,15 +18,15 @@ var mqtt = require('mqtt');
 var fs = require('fs');
 var spawn = require('child_process').spawn;
 
-var my_msw_name = 'msw_sec';
-
 var fc = {};
 var config = {};
 
-config.name = my_msw_name;
+config.name = 'msw_sec';
 
 try {
-    config.directory_name = msw_directory[my_msw_name];
+    drone_info = JSON.parse(fs.readFileSync('../drone_info.json', 'utf8'));
+
+    config.directory_name = config.name + '_' + config.name;
     config.gcs = drone_info.gcs;
     config.drone = drone_info.drone;
     config.lib = [];
