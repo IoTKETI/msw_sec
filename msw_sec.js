@@ -27,13 +27,10 @@ config.name = my_msw_name;
 
 try {
     config.directory_name = msw_directory[my_msw_name];
-    config.sortie = my_sortie_name;
     config.gcs = drone_info.gcs;
     config.drone = drone_info.drone;
     config.lib = [];
-}
-catch (e) {
-    config.sortie_name = '';
+} catch (e) {
     config.directory_name = '';
     config.gcs = 'KETI_MUV';
     config.drone = 'FC_MUV_01';
@@ -45,8 +42,7 @@ var add_lib = {};
 try {
     add_lib = JSON.parse(fs.readFileSync('lib_sec.json', 'utf8'));
     config.lib.push(add_lib);
-}
-catch (e) {
+} catch (e) {
     add_lib = {
         name: 'lib_sec',
         target: 'armv6',
@@ -71,9 +67,9 @@ msw_sub_fc_topic.push('/Mobius/' + config.gcs + '/Drone_Data/' + config.drone + 
 var msw_sub_lib_topic = [];
 
 function init() {
-    if(config.lib.length > 0) {
-        for(var idx in config.lib) {
-            if(config.lib.hasOwnProperty(idx)) {
+    if (config.lib.length > 0) {
+        for (var idx in config.lib) {
+            if (config.lib.hasOwnProperty(idx)) {
                 if (msw_mqtt_client != null) {
                     for (var i = 0; i < config.lib[idx].control.length; i++) {
                         var sub_container_name = config.lib[idx].control[i];
@@ -93,7 +89,7 @@ function init() {
                 }
 
                 var obj_lib = config.lib[idx];
-                setTimeout(runLib, 1000 + parseInt(Math.random()*10), JSON.parse(JSON.stringify(obj_lib)));
+                setTimeout(runLib, 1000 + parseInt(Math.random() * 10), JSON.parse(JSON.stringify(obj_lib)));
             }
         }
     }
@@ -102,33 +98,31 @@ function init() {
 function runLib(obj_lib) {
     try {
         var scripts_arr = obj_lib.scripts.split(' ');
-        if(config.directory_name == '') {
+        if (config.directory_name == '') {
 
-        }
-        else {
+        } else {
             scripts_arr[0] = scripts_arr[0].replace('./', '');
             scripts_arr[0] = './' + config.directory_name + '/' + scripts_arr[0];
         }
         console.log('[msw] ' + config.directory_name);
         var run_lib = spawn(scripts_arr[0], scripts_arr.slice(1));
 
-        run_lib.stdout.on('data', function(data) {
+        run_lib.stdout.on('data', function (data) {
             console.log('stdout: ' + data);
         });
 
-        run_lib.stderr.on('data', function(data) {
+        run_lib.stderr.on('data', function (data) {
             console.log('stderr: ' + data);
         });
 
-        run_lib.on('exit', function(code) {
+        run_lib.on('exit', function (code) {
             console.log('exit: ' + code);
         });
 
-        run_lib.on('error', function(code) {
+        run_lib.on('error', function (code) {
             console.log('error: ' + code);
         });
-    }
-    catch (e) {
+    } catch (e) {
         console.log(e.message);
     }
 }
@@ -138,7 +132,7 @@ var msw_mqtt_client = null;
 msw_mqtt_connect('localhost', 1883);
 
 function msw_mqtt_connect(broker_ip, port) {
-    if(msw_mqtt_client == null) {
+    if (msw_mqtt_client == null) {
         var connectOptions = {
             host: broker_ip,
             port: port,
@@ -159,8 +153,8 @@ function msw_mqtt_connect(broker_ip, port) {
 
         msw_mqtt_client.on('connect', function () {
             console.log('[msw_mqtt_connect] connected to ' + broker_ip);
-            for(idx in msw_sub_fc_topic) {
-                if(msw_sub_fc_topic.hasOwnProperty(idx)) {
+            for (idx in msw_sub_fc_topic) {
+                if (msw_sub_fc_topic.hasOwnProperty(idx)) {
                     msw_mqtt_client.subscribe(msw_sub_fc_topic[idx]);
                     console.log('[msw_mqtt] msw_sub_fc_topic[' + idx + ']: ' + msw_sub_fc_topic[idx]);
                 }
@@ -168,27 +162,27 @@ function msw_mqtt_connect(broker_ip, port) {
         });
 
         msw_mqtt_client.on('message', function (topic, message) {
-            for(var idx in msw_sub_muv_topic) {
+            for (var idx in msw_sub_muv_topic) {
                 if (msw_sub_muv_topic.hasOwnProperty(idx)) {
-                    if(topic == msw_sub_muv_topic[idx]) {
+                    if (topic == msw_sub_muv_topic[idx]) {
                         setTimeout(on_receive_from_muv, parseInt(Math.random() * 5), topic, message.toString());
                         break;
                     }
                 }
             }
 
-            for(idx in msw_sub_lib_topic) {
+            for (idx in msw_sub_lib_topic) {
                 if (msw_sub_lib_topic.hasOwnProperty(idx)) {
-                    if(topic == msw_sub_lib_topic[idx]) {
+                    if (topic == msw_sub_lib_topic[idx]) {
                         setTimeout(on_receive_from_lib, parseInt(Math.random() * 5), topic, message.toString());
                         break;
                     }
                 }
             }
 
-            for(idx in msw_sub_fc_topic) {
+            for (idx in msw_sub_fc_topic) {
                 if (msw_sub_fc_topic.hasOwnProperty(idx)) {
-                    if(topic == msw_sub_fc_topic[idx]) {
+                    if (topic == msw_sub_fc_topic[idx]) {
                         setTimeout(on_process_fc_data, parseInt(Math.random() * 5), topic, message.toString());
                         break;
                     }
@@ -216,7 +210,7 @@ function on_receive_from_lib(topic, str_message) {
 
 function on_process_fc_data(topic, str_message) {
     var topic_arr = topic.split('/');
-    fc[topic_arr[topic_arr.length-1]] = JSON.parse(str_message.toString());
+    fc[topic_arr[topic_arr.length - 1]] = JSON.parse(str_message.toString());
 
     parseFcData(topic, str_message);
 }
@@ -230,39 +224,28 @@ setTimeout(init, 1000);
 var authResult = 'none';
 
 setTimeout(function () {
-    if(msw_mqtt_client != null) {
+    if (msw_mqtt_client != null) {
         var _topic = '/MUV/control/' + config.lib[0].name + '/' + config.lib[0].control[0]; // 'Req_start'
         msw_mqtt_client.publish(_topic, '');
         console.log('\r\n\r\n[publish] Trigger Sec Board:', _topic, '\r\n\r\n\r\n');
     }
 }, 15000);
 
-config.sortie_name = '';
 ///////////////////////////////////////////////////////////////////////////////
 
 function parseDataMission(topic, str_message) {
     try {
-        try {
-            config.sortie = my_sortie_name;
-        }
-        catch (e) {
-            config.sortie_name = '';
-        }
-
+        // User define Code
         var topic_arr = topic.split('/');
 
-        // User define Code
-        config.sortie_name = '';
-
-        if(topic_arr[topic_arr.length - 1] == 'Req_ready') {
+        if (topic_arr[topic_arr.length - 1] == 'Req_ready') {
             setTimeout(setAuthResult, 1000);
         }
         ///////////////////////////////////////////////////////////////////////
 
-        var data_topic = '/Mobius/' + config.gcs + '/Mission_Data/' + config.drone + '/' + config.name + '/' + topic_arr[topic_arr.length-1];
-        msw_mqtt_client.publish(data_topic + config.sortie_name, str_message);
-    }
-    catch (e) {
+        var data_topic = '/Mobius/' + config.gcs + '/Mission_Data/' + config.drone + '/' + config.name + '/' + topic_arr[topic_arr.length - 1];
+        msw_mqtt_client.publish(data_topic, str_message);
+    } catch (e) {
         console.log('[parseDataMission] data format of lib is not json');
     }
 }
@@ -277,8 +260,7 @@ function parseControlMission(topic, str_message) {
 
         var _topic = '/MUV/control/' + config.lib[0].name + '/' + topic_arr[topic_arr.length - 1];
         msw_mqtt_client.publish(_topic, str_message);
-    }
-    catch (e) {
+    } catch (e) {
         console.log('[parseDataMission] data format of lib is not json');
     }
 }
@@ -287,7 +269,7 @@ function parseFcData(topic, str_message) {
     var topic_arr = topic.split('/');
 
     // User define Code
-    if(authResult == 'done') {
+    if (authResult == 'done') {
         // if (topic_arr[topic_arr.length - 1] == 'global_position_int') {
         //     var _topic = '/MUV/control/' + config.lib[0].name + '/' + config.lib[0].control[2]; // 'Req_enc'
         //     msw_mqtt_client.publish(_topic, Buffer.from(str_message).toString('hex'));
