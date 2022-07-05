@@ -87,7 +87,11 @@ function init() {
                     for (let i = 0; i < config.lib[idx].data.length; i++) {
                         let container_name = config.lib[idx].data[i];
                         let _topic = '/MUV/data/' + config.lib[idx].name + '/' + container_name;
-                        local_msw_mqtt_client.subscribe(_topic);
+                        local_msw_mqtt_client.subscribe(_topic, function (err) {
+                            if (!err) {
+                                console.log('[local_msw_mqtt] msw_sub_lib_topic[' + idx + ']: ' + msw_sub_lib_topic[idx]);
+                            }
+                        })
                         msw_sub_lib_topic.push(_topic);
                         console.log('[lib_mqtt] msw_sub_lib_topic[' + i + ']: ' + _topic);
                     }
