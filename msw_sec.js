@@ -287,7 +287,7 @@ setTimeout(function () {
         local_msw_mqtt_client.publish(_topic, '');
         console.log('\r\n\r\n[publish] Trigger Sec Board:', _topic, '\r\n\r\n\r\n');
     }
-}, 15000);
+}, 1000);
 
 ///////////////////////////////////////////////////////////////////////////////
 
